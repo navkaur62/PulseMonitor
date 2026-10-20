@@ -1,0 +1,17 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.next/
+
+# Generated Prisma client
+generated/
+
+# Logs
+npm-debug.log*
