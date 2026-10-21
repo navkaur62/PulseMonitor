@@ -1,10 +1,11 @@
-
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { prisma } from "./lib/prisma.js";
 import monitorRoutes from "./routes/monitor.routes.js";
 import healthCheckRoutes from "./routes/health-check.routes.js";
+
+import { startMonitorScheduler } from "./services/scheduler.service.js";
 dotenv.config();
 
 const app = express();
@@ -14,6 +15,7 @@ app.use(cors());
 app.use(express.json());
 app.use("/api/monitors", monitorRoutes);
 app.use("/api/health-checks", healthCheckRoutes);
+startMonitorScheduler();
 app.get("/api/health", (_req, res) => {
   res.status(200).json({
     success: true,

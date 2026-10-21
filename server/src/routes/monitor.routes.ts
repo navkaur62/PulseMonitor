@@ -280,4 +280,106 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+/* GET /api/monitors/:id/history */
+router.get("/:id/history", async (req, res) => {
+  try {
+    const id = String(req.params.id);
+
+    const monitor = await prisma.monitor.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!monitor) {
+      res.status(404).json({
+        success: false,
+        message: "Monitor not found.",
+      });
+      return;
+    }
+
+    const history = await prisma.healthCheck.findMany({
+      where: { monitorId: id },
+      orderBy: { checkedAt: "desc" },
+      take: 100,
+    });
+
+    res.status(200).json({
+      success: true,
+      count: history.length,
+      data: history,
+    });
+  } catch (error) {
+    console.error("Health-check history failed:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch health-check history.",
+    });
+  }
+});
+
+/* GET /api/monitors/:id/stats */
+router.get("/:id/stats", async (req, res) => {
+  try {
+    const id = String(req.params.id);
+
+    const monitor = await prisma.monitor.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!monitor) {
+      res.status(404).json({
+        success: false,
+        message: "Monitor not found.",
+      });
+      return;
+    }
+
+    const [totalChecks, successfulChecks, responseStats] =
+      await Promise.all([
+        prisma.healthCheck.count({
+          where: { monitorId: id },
+        }),
+        prisma.healthCheck.count({
+          where: { monitorId: id, isUp: true },
+        }),
+        prisma.healthCheck.aggregate({
+          where: {
+            monitorId: id,
+            responseTimeMs: { not: null },
+          },
+          _avg: { responseTimeMs: true },
+        }),
+      ]);
+
+    const uptimePercentage =
+      totalChecks === 0
+        ? null
+        : Number(
+            ((successfulChecks / totalChecks) * 100).toFixed(2)
+          );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalChecks,
+        successfulChecks,
+        failedChecks: totalChecks - successfulChecks,
+        uptimePercentage,
+        averageResponseTimeMs:
+          responseStats._avg.responseTimeMs === null
+            ? null
+            : Math.round(responseStats._avg.responseTimeMs),
+      },
+    });
+  } catch (error) {
+    console.error("Monitor statistics failed:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to calculate monitor statistics.",
+    });
+  }
+});
+
 export default router;

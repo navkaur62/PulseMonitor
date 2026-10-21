@@ -5,7 +5,7 @@ import { prisma } from "../lib/prisma.js";
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export async function checkMonitor(monitorId: string) {
-  // Find the monitor in PostgreSQL.
+  // 1. Find the monitor.
   const monitor = await prisma.monitor.findUnique({
     where: { id: monitorId },
   });
@@ -21,6 +21,7 @@ export async function checkMonitor(monitorId: string) {
   let isUp = false;
   let errorMessage: string | null = null;
 
+  // 2. Check the website.
   try {
     const response = await fetch(monitor.url, {
       method: monitor.method,
@@ -35,7 +36,6 @@ export async function checkMonitor(monitorId: string) {
       errorMessage = `HTTP error: ${response.status}`;
     }
 
-    // Release the response body without downloading it all.
     await response.body?.cancel();
   } catch (error) {
     responseTimeMs = Math.round(performance.now() - startedAt);
@@ -46,7 +46,7 @@ export async function checkMonitor(monitorId: string) {
         : "An unknown error occurred.";
   }
 
-  // Save this check in PostgreSQL.
+  // 3. Save the health-check result.
   const healthCheck = await prisma.healthCheck.create({
     data: {
       monitorId: monitor.id,
@@ -57,6 +57,48 @@ export async function checkMonitor(monitorId: string) {
     },
   });
 
+  // 4. Find any unresolved incident for this monitor.
+  const openIncident = await prisma.incident.findFirst({
+    where: {
+      monitorId: monitor.id,
+      resolvedAt: null,
+    },
+    orderBy: {
+      startedAt: "desc",
+    },
+  });
+
+  if (!isUp) {
+    // 5. Create an incident only if one is not already open.
+    if (!openIncident) {
+      await prisma.incident.create({
+        data: {
+          monitorId: monitor.id,
+          title: `${monitor.name} is down`,
+          description:
+            errorMessage ?? "The monitor did not return a successful response.",
+        },
+      });
+
+      console.log(`[Incident] OPENED: ${monitor.name}`);
+    } else {
+      console.log(`[Incident] Still open: ${monitor.name}`);
+    }
+  } else if (openIncident) {
+    // 6. Resolve the incident when the monitor recovers.
+    await prisma.incident.update({
+      where: {
+        id: openIncident.id,
+      },
+      data: {
+        resolvedAt: new Date(),
+      },
+    });
+
+    console.log(`[Incident] RESOLVED: ${monitor.name}`);
+  }
+
+  // 7. Return the health-check result.
   return {
     monitorId: monitor.id,
     monitorName: monitor.name,
